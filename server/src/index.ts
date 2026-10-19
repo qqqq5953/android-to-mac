@@ -1,17 +1,18 @@
+import { execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { mkdir } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Bonjour } from 'bonjour-service';
 import qrcode from 'qrcode-terminal';
 import { handleUpload } from './upload.js';
 import { serveStatic } from './static.js';
 import { HttpError } from './errors.js';
+import { advertise } from './mdns.js';
 
 const PORT = Number(process.env.PORT ?? 8765);
 const SAVE_DIR = process.env.SAVE_DIR ?? path.join(os.homedir(), 'Downloads', 'FromAndroid');
-const DEVICE_NAME = process.env.DEVICE_NAME ?? os.hostname().replace(/\.local$/, '');
+const DEVICE_NAME = process.env.DEVICE_NAME ?? computerName();
 const WEB_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../web/dist');
 
 /** mDNS 服務類型，Android App 會用這個名字找 Mac */
@@ -56,11 +57,13 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`🌐 手機瀏覽器開：${urls.join('  ')}`);
   if (urls[0]) qrcode.generate(urls[0], { small: true });
 
-  const bonjour = new Bonjour();
-  bonjour.publish({ name: DEVICE_NAME, type: SERVICE_TYPE, port: PORT });
+  const stopAdvertising = advertise(DEVICE_NAME, SERVICE_TYPE, PORT);
   console.log(`📡 mDNS 廣播中：_${SERVICE_TYPE}._tcp「${DEVICE_NAME}」`);
 
-  const shutdown = () => bonjour.unpublishAll(() => process.exit(0));
+  const shutdown = () => {
+    stopAdvertising();
+    process.exit(0);
+  };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 });
@@ -80,4 +83,14 @@ function formatBytes(n: number): string {
     i++;
   }
   return `${n.toFixed(i ? 1 : 0)} ${units[i]}`;
+}
+
+/** Mac 上用「系統設定 > 一般 > 關於本機」裡的名稱（例如「Andy 的 MacBook Pro」） */
+function computerName(): string {
+  if (process.platform === 'darwin') {
+    try {
+      return execFileSync('scutil', ['--get', 'ComputerName'], { encoding: 'utf8' }).trim();
+    } catch {}
+  }
+  return os.hostname().replace(/\.local$/, '');
 }
