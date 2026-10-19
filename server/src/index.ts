@@ -8,15 +8,11 @@ import qrcode from 'qrcode-terminal';
 import { handleUpload } from './upload.js';
 import { serveStatic } from './static.js';
 import { HttpError } from './errors.js';
-import { advertise } from './mdns.js';
 
 const PORT = Number(process.env.PORT ?? 8765);
 const SAVE_DIR = process.env.SAVE_DIR ?? path.join(os.homedir(), 'Downloads', 'FromAndroid');
 const DEVICE_NAME = process.env.DEVICE_NAME ?? computerName();
 const WEB_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../web/dist');
-
-/** mDNS 服務類型，Android App 會用這個名字找 Mac */
-export const SERVICE_TYPE = 'android2mac';
 
 await mkdir(SAVE_DIR, { recursive: true });
 
@@ -57,16 +53,6 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log('🌐 手機瀏覽器開（QR code 是第一個）：');
   for (const { iface, ip } of addresses) console.log(`   http://${ip}:${PORT}  (${iface})`);
   if (addresses[0]) qrcode.generate(`http://${addresses[0].ip}:${PORT}`, { small: true });
-
-  const stopAdvertising = advertise(DEVICE_NAME, SERVICE_TYPE, PORT);
-  console.log(`📡 mDNS 廣播中：_${SERVICE_TYPE}._tcp「${DEVICE_NAME}」`);
-
-  const shutdown = () => {
-    stopAdvertising();
-    process.exit(0);
-  };
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
 });
 
 /**
