@@ -4,7 +4,7 @@
 
 ```
 server/   Mac 端接收 server（Node + TypeScript）
-web/      React 上傳頁，手機用瀏覽器開
+web/      上傳頁（原生 TypeScript + Vite），手機用瀏覽器開
 ```
 
 ## 使用方式（Mac 上）

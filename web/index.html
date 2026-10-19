@@ -6,7 +6,30 @@
     <title>傳到 Mac</title>
   </head>
   <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <main>
+      <h1 id="title">傳到 Mac</h1>
+      <label class="picker">
+        選擇照片、影片或檔案
+        <input id="picker" type="file" multiple hidden />
+      </label>
+      <div id="toolbar" class="toolbar" hidden>
+        <button id="clear-done" type="button">清除已完成</button>
+      </div>
+      <ul id="list"></ul>
+    </main>
+
+    <template id="item-template">
+      <li>
+        <span class="name"></span>
+        <span class="actions">
+          <span class="meta"></span>
+          <button class="retry" type="button">重試</button>
+          <button class="remove" type="button" aria-label="移除">✕</button>
+        </span>
+        <progress max="1" value="0"></progress>
+      </li>
+    </template>
+
+    <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
