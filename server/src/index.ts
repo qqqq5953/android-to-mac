@@ -52,10 +52,11 @@ const server = createServer(async (req, res) => {
 server.requestTimeout = 0;
 
 server.listen(PORT, '0.0.0.0', () => {
-  const urls = lanAddresses().map((ip) => `http://${ip}:${PORT}`);
+  const addresses = lanAddresses();
   console.log(`📥 檔案會存到 ${SAVE_DIR}`);
-  console.log(`🌐 手機瀏覽器開：${urls.join('  ')}`);
-  if (urls[0]) qrcode.generate(urls[0], { small: true });
+  console.log('🌐 手機瀏覽器開（QR code 是第一個）：');
+  for (const { iface, ip } of addresses) console.log(`   http://${ip}:${PORT}  (${iface})`);
+  if (addresses[0]) qrcode.generate(`http://${addresses[0].ip}:${PORT}`, { small: true });
 
   const stopAdvertising = advertise(DEVICE_NAME, SERVICE_TYPE, PORT);
   console.log(`📡 mDNS 廣播中：_${SERVICE_TYPE}._tcp「${DEVICE_NAME}」`);
@@ -68,11 +69,16 @@ server.listen(PORT, '0.0.0.0', () => {
   process.on('SIGTERM', shutdown);
 });
 
-function lanAddresses(): string[] {
-  return Object.values(os.networkInterfaces())
-    .flat()
-    .filter((i) => i && i.family === 'IPv4' && !i.internal)
-    .map((i) => i!.address);
+/**
+ * 列出本機 IPv4 位址，Wi-Fi／有線網卡（Mac 上是 en0、en1…）排前面，
+ * VPN（utun）、虛擬機或 Docker 的橋接網卡（bridge、vmnet）手機通常連不到，排後面。
+ */
+function lanAddresses(): { iface: string; ip: string }[] {
+  const list = Object.entries(os.networkInterfaces()).flatMap(([iface, infos]) =>
+    (infos ?? []).filter((i) => i.family === 'IPv4' && !i.internal).map((i) => ({ iface, ip: i.address })),
+  );
+  const rank = ({ iface }: { iface: string }) => (/^(en|eth|wl)/.test(iface) ? 0 : 1);
+  return list.sort((a, b) => rank(a) - rank(b));
 }
 
 function formatBytes(n: number): string {
