@@ -1,6 +1,6 @@
 import type { IncomingMessage } from 'node:http';
-import { createWriteStream } from 'node:fs';
-import { access, rename, unlink } from 'node:fs/promises';
+import { createWriteStream, existsSync } from 'node:fs';
+import { rename, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { HttpError } from './errors.js';
@@ -21,26 +21,30 @@ export async function handleUpload(req: IncomingMessage, saveDir: string): Promi
   if (typeof header !== 'string' || !header) throw new HttpError(400, '缺少 X-File-Name header');
 
   const fileName = sanitize(decodeURIComponent(header));
-  const finalPath = await uniquePath(saveDir, fileName);
+  const finalPath = reservePath(saveDir, fileName);
   const tempPath = `${finalPath}.part`;
 
-  let size = 0;
-  req.on('data', (chunk: Buffer) => (size += chunk.length));
   try {
-    await pipeline(req, createWriteStream(tempPath));
-  } catch (err) {
-    await unlink(tempPath).catch(() => {});
-    throw new HttpError(400, `傳輸中斷：${(err as Error).message}`);
-  }
+    let size = 0;
+    req.on('data', (chunk: Buffer) => (size += chunk.length));
+    try {
+      await pipeline(req, createWriteStream(tempPath));
+    } catch (err) {
+      await unlink(tempPath).catch(() => {});
+      throw new HttpError(400, `傳輸中斷：${(err as Error).message}`);
+    }
 
-  const expected = Number(req.headers['content-length']);
-  if (Number.isFinite(expected) && expected !== size) {
-    await unlink(tempPath).catch(() => {});
-    throw new HttpError(400, `檔案不完整：收到 ${size} / ${expected} bytes`);
-  }
+    const expected = Number(req.headers['content-length']);
+    if (Number.isFinite(expected) && expected !== size) {
+      await unlink(tempPath).catch(() => {});
+      throw new HttpError(400, `檔案不完整：收到 ${size} / ${expected} bytes`);
+    }
 
-  await rename(tempPath, finalPath);
-  return { fileName: path.basename(finalPath), size };
+    await rename(tempPath, finalPath);
+    return { fileName: path.basename(finalPath), size };
+  } finally {
+    reserved.delete(finalPath);
+  }
 }
 
 /** 只留檔名本身，防止 ../ 之類的路徑穿越 */
@@ -49,15 +53,19 @@ function sanitize(name: string): string {
   return base && base !== '.' && base !== '..' ? base : 'untitled';
 }
 
-/** 檔名重複時改成 photo (1).jpg、photo (2).jpg… */
-async function uniquePath(dir: string, fileName: string): Promise<string> {
+/** 正在上傳中的檔案路徑，同時上傳同名檔案時才不會挑到同一個名字 */
+const reserved = new Set<string>();
+
+/**
+ * 檔名重複時改成 photo (1).jpg、photo (2).jpg…
+ * 刻意用同步的 existsSync：檢查和登記之間不會被其他請求插隊。
+ */
+function reservePath(dir: string, fileName: string): string {
   const { name, ext } = path.parse(fileName);
   for (let i = 0; ; i++) {
     const candidate = path.join(dir, i === 0 ? fileName : `${name} (${i})${ext}`);
-    const taken = await Promise.any([access(candidate), access(`${candidate}.part`)]).then(
-      () => true,
-      () => false,
-    );
-    if (!taken) return candidate;
+    if (reserved.has(candidate) || existsSync(candidate) || existsSync(`${candidate}.part`)) continue;
+    reserved.add(candidate);
+    return candidate;
   }
 }

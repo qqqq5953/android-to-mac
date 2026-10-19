@@ -17,9 +17,12 @@ const toolbar = $<HTMLDivElement>('#toolbar');
 const list = $<HTMLUListElement>('#list');
 const template = $<HTMLTemplateElement>('#item-template');
 
+/** 同時上傳的檔案數：小檔案多時能重疊連線等待時間，大檔案也不會互相搶頻寬搶太兇 */
+const MAX_PARALLEL = 3;
+
 const items = new Set<Item>();
 const queue: Item[] = [];
-let running = false;
+let active = 0;
 
 fetch('/api/info')
   .then((r) => r.json())
@@ -58,24 +61,33 @@ function remove(item: Item) {
   updateToolbar();
 }
 
-/** 一次傳一個，避免手機同時開太多連線 */
-async function enqueue(item: Item) {
+function enqueue(item: Item) {
   render(item, 'waiting', 0);
   queue.push(item);
-  if (running) return;
-  running = true;
-  while (queue.length) {
+  pump();
+}
+
+/** 有空位就從排隊中拿下一個來傳，最多同時 MAX_PARALLEL 個 */
+function pump() {
+  while (active < MAX_PARALLEL && queue.length) {
     const next = queue.shift()!;
-    if (!items.has(next)) continue;
-    render(next, 'uploading', 0);
-    try {
-      await uploadFile(next.file, (ratio) => render(next, 'uploading', ratio));
-      render(next, 'done', 1);
-    } catch (err) {
-      render(next, 'error', 0, (err as Error).message);
-    }
+    if (!items.has(next)) continue; // 排隊時被移除了
+    active++;
+    upload(next).finally(() => {
+      active--;
+      pump();
+    });
   }
-  running = false;
+}
+
+async function upload(item: Item) {
+  render(item, 'uploading', 0);
+  try {
+    await uploadFile(item.file, (ratio) => render(item, 'uploading', ratio));
+    render(item, 'done', 1);
+  } catch (err) {
+    render(item, 'error', 0, (err as Error).message);
+  }
 }
 
 function render(item: Item, status: Status, progress: number, error?: string) {
