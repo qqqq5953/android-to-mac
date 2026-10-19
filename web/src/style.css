@@ -88,14 +88,10 @@ button {
 .remove {
   color: var(--muted);
 }
-/* 上傳中的不能移除；只有失敗的能重試 */
-li .remove,
+/* 只有失敗的能重試 */
 li .retry {
   display: none;
 }
-li.waiting .remove,
-li.done .remove,
-li.error .remove,
 li.error .retry {
   display: inline-block;
 }

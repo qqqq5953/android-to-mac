@@ -7,6 +7,8 @@ interface Item {
   file: File;
   status: Status;
   el: HTMLLIElement;
+  /** 上傳中才有，用來中斷這次上傳 */
+  abort?: AbortController;
 }
 
 const $ = <T extends Element>(selector: string, root: ParentNode = document) => root.querySelector<T>(selector)!;
@@ -57,6 +59,7 @@ function createItem(file: File, parent: ParentNode): Item {
 
 function remove(item: Item) {
   items.delete(item); // 還在排隊的會在輪到時被跳過
+  item.abort?.abort(); // 上傳中的直接中斷
   item.el.remove();
   updateToolbar();
 }
@@ -82,11 +85,14 @@ function pump() {
 
 async function upload(item: Item) {
   render(item, 'uploading', 0);
+  item.abort = new AbortController();
   try {
-    await uploadFile(item.file, (ratio) => render(item, 'uploading', ratio));
+    await uploadFile(item.file, (ratio) => render(item, 'uploading', ratio), item.abort.signal);
     render(item, 'done', 1);
   } catch (err) {
-    render(item, 'error', 0, (err as Error).message);
+    if (!item.abort.signal.aborted) render(item, 'error', 0, (err as Error).message);
+  } finally {
+    item.abort = undefined;
   }
 }
 
