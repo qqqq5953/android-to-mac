@@ -12,10 +12,27 @@
         選擇照片、影片或檔案
         <input id="picker" type="file" multiple hidden />
       </label>
-      <div id="toolbar" class="toolbar" hidden>
-        <button id="clear-done" type="button">清除已完成</button>
+      <div id="groups">
+        <section class="group" data-status="uploading" hidden>
+          <div class="group-header"><h2>上傳中 <span class="count"></span></h2></div>
+          <ul></ul>
+        </section>
+        <section class="group" data-status="error" hidden>
+          <div class="group-header"><h2>失敗 <span class="count"></span></h2></div>
+          <ul></ul>
+        </section>
+        <section class="group" data-status="waiting" hidden>
+          <div class="group-header"><h2>等待中 <span class="count"></span></h2></div>
+          <ul></ul>
+        </section>
+        <section class="group" data-status="done" hidden>
+          <div class="group-header">
+            <h2>已完成 <span class="count"></span></h2>
+            <button id="clear-done" type="button">清除已完成</button>
+          </div>
+          <ul></ul>
+        </section>
       </div>
-      <ul id="list"></ul>
     </main>
 
     <template id="item-template">
