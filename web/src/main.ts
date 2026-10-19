@@ -41,7 +41,14 @@ fetch('/api/info')
   })
   .catch(() => {});
 
+const pickerLabel = picker.closest('label')!;
+// 打開選擇器時就切成「讀取中」：使用者選完回到網頁時，瀏覽器可能還在複製檔案，
+// change 要等複製完才會觸發，這段時間至少讓使用者知道有在處理
+picker.addEventListener('click', () => pickerLabel.classList.add('loading'));
+picker.addEventListener('cancel', () => pickerLabel.classList.remove('loading'));
+
 picker.addEventListener('change', () => {
+  pickerLabel.classList.remove('loading');
   const added = Array.from(picker.files ?? [], createItem);
   picker.value = ''; // 讓同一個檔案可以再選一次
   added.forEach(enqueue);
@@ -106,14 +113,8 @@ async function upload(item: Item) {
 function render(item: Item, status: Status, progress: number, error?: string) {
   // 換組（或第一次放進畫面）時才搬動，進度更新只改文字和進度條
   if (status !== item.status || !item.el.isConnected) {
-    animateLayout(() => {
-      item.status = status;
-      item.el.className = status;
-      // 已完成的新的放上面；其他組照先來後到
-      if (status === 'done') groups.done.list.prepend(item.el);
-      else groups[status].list.append(item.el);
-      updateGroups();
-    });
+    item.status = status;
+    scheduleMove(item);
   }
   $<HTMLProgressElement>('progress', item.el).value = progress;
   $('.meta', item.el).textContent =
@@ -126,6 +127,34 @@ function render(item: Item, status: Status, progress: number, error?: string) {
           : '等待中';
 }
 
+const pendingMoves = new Set<Item>();
+let moveScheduled = false;
+
+/**
+ * 換組的 DOM 搬動統一在下一個畫面一次做完：小檔案傳很快時一秒可能換組幾十次，
+ * 合併起來每個畫面最多只量一次位置、播一次動畫。
+ */
+function scheduleMove(item: Item) {
+  pendingMoves.add(item);
+  if (moveScheduled) return;
+  moveScheduled = true;
+  requestAnimationFrame(() => {
+    moveScheduled = false;
+    const moves = [...pendingMoves];
+    pendingMoves.clear();
+    animateLayout(() => {
+      for (const it of moves) {
+        if (!items.has(it)) continue; // 搬動前就被移除了
+        it.el.className = it.status;
+        // 已完成的新的放上面；其他組照先來後到
+        if (it.status === 'done') groups.done.list.prepend(it.el);
+        else groups[it.status].list.append(it.el);
+      }
+      updateGroups();
+    });
+  });
+}
+
 function updateGroups() {
   for (const { section, list, count } of Object.values(groups)) {
     section.hidden = list.children.length === 0;
@@ -134,36 +163,48 @@ function updateGroups() {
 }
 
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
+/** 清單超過這個數量就不播換組動畫：一直有列在飛也看不清楚，只會讓手機卡頓 */
+const MAX_ANIMATED_ITEMS = 50;
+/** 自己記錄哪些元素正在播動畫，不用每次都問每個元素的 getAnimations() */
+const running = new Map<HTMLElement, Animation>();
 
 /**
  * FLIP 動畫：先記下每一列和每個組標題在畫面上的位置，做完 DOM 變動後，
  * 讓有移動的元素從舊位置滑到新位置，新出現的淡入。
  * 量位置時已經包含進行中動畫的位移，所以連續換組時會從目前看到的位置接著滑。
+ * 讀位置和改 DOM／取消動畫要分開成整批做，交錯的話每讀一次都會強迫瀏覽器重算版面。
  */
 function animateLayout(mutate: () => void) {
-  const targets = () => groupsEl.querySelectorAll<HTMLElement>('li, .group-header');
+  if (reduceMotion.matches || items.size > MAX_ANIMATED_ITEMS) return mutate();
+  const targets = () => [...groupsEl.querySelectorAll<HTMLElement>('li, .group-header')];
   const before = new Map<HTMLElement, DOMRect>();
   for (const el of targets()) before.set(el, el.getBoundingClientRect());
 
   mutate();
-  if (reduceMotion.matches) return;
 
-  for (const el of targets()) {
-    el.getAnimations().forEach((a) => a.cancel());
+  for (const a of running.values()) a.cancel();
+  running.clear();
+  const els = targets();
+  const after = els.map((el) => el.getBoundingClientRect());
+
+  const onScreen = (r: DOMRect) => r.bottom > 0 && r.top < innerHeight;
+  els.forEach((el, i) => {
     const old = before.get(el);
+    const now = after[i];
+    if (!onScreen(now) && (!old || !onScreen(old))) return; // 前後都在畫面外，不用播
     if (!old || old.height === 0) {
       // 新加入的列，或剛從隱藏變成顯示的組標題
-      el.animate([{ opacity: 0, transform: 'scale(0.97)' }, { opacity: 1, transform: 'none' }], {
-        duration: 250,
-        easing: 'ease-out',
-      });
-      continue;
+      play(el, [{ opacity: 0, transform: 'scale(0.97)' }, { opacity: 1, transform: 'none' }], 250, 'ease-out');
+      return;
     }
-    const dy = old.top - el.getBoundingClientRect().top;
-    if (Math.abs(dy) < 1) continue;
-    el.animate([{ transform: `translateY(${dy}px)` }, { transform: 'none' }], {
-      duration: 350,
-      easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
-    });
-  }
+    const dy = old.top - now.top;
+    if (Math.abs(dy) < 1) return;
+    play(el, [{ transform: `translateY(${dy}px)` }, { transform: 'none' }], 350, 'cubic-bezier(0.2, 0.8, 0.2, 1)');
+  });
+}
+
+function play(el: HTMLElement, keyframes: Keyframe[], duration: number, easing: string) {
+  const animation = el.animate(keyframes, { duration, easing });
+  running.set(el, animation);
+  animation.onfinish = () => running.get(el) === animation && running.delete(el);
 }

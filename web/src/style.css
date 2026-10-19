@@ -41,6 +41,29 @@ h1 {
   font-weight: 600;
   cursor: pointer;
 }
+/* 選擇器交出檔案前（Android 可能要先複製檔案）顯示讀取中 */
+.picker-loading,
+.picker.loading .picker-idle {
+  display: none;
+}
+.picker.loading .picker-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.spinner {
+  width: 18px;
+  height: 18px;
+  border: 2.5px solid rgb(255 255 255 / 0.4);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 /* 分組：上傳中 → 失敗 → 等待中 → 已完成，沒有檔案的組整組隱藏 */
 .group[hidden] {
   display: none;
@@ -75,6 +98,9 @@ li {
   margin-bottom: 8px;
   border-radius: 12px;
   background: var(--card);
+  /* 畫面外的列跳過排版與繪製，清單很長時換組才不會卡 */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 72px;
 }
 .name {
   overflow: hidden;
